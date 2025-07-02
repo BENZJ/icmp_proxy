@@ -1,3 +1,4 @@
 *.test
 icmptun_server
 icmptun_client
+output/
