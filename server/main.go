@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -26,13 +25,17 @@ type icmpConn interface {
 
 func main() {
 	// 启动监听 ICMP 包，通常需要 root 权限
+	log.Printf("开始监听 ICMP network=%s address=%s", "ip4:icmp", "0.0.0.0")
 	conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
 	if err != nil {
 		log.Fatalf("Error listening for ICMP packets: %v. Note: this may require root privileges.", err)
 	}
-	defer conn.Close()
+	defer func() {
+		conn.Close()
+		log.Println("ICMP 监听器已关闭")
+	}()
 
-	fmt.Println("ICMP HTTP 代理服务器已启动，等待请求...")
+	log.Println("ICMP HTTP 代理服务器已启动，等待请求...")
 
 	for {
 		buf := make([]byte, 1500) // MTU 大小

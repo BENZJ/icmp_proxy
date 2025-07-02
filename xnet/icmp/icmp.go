@@ -3,6 +3,7 @@ package icmp
 import (
 	"encoding/binary"
 	"errors"
+	"log"
 	"net"
 )
 
@@ -40,10 +41,32 @@ func (e *Echo) Marshal(proto int) ([]byte, error) {
 
 // ListenPacket 封装 net.ListenPacket
 func ListenPacket(network, address string) (net.PacketConn, error) {
-	return net.ListenPacket(network, address)
+	conn, err := net.ListenPacket(network, address)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("icmp.ListenPacket: network=%s address=%s", network, address)
+	return conn, nil
 }
 
-// Marshal 编码 ICMP 消息，简化处理未计算校验和
+// checksum calculates the ICMP checksum for the given data using the standard
+// one's complement sum.
+func checksum(b []byte) uint16 {
+	var sum uint32
+	for len(b) > 1 {
+		sum += uint32(binary.BigEndian.Uint16(b))
+		b = b[2:]
+	}
+	if len(b) > 0 {
+		sum += uint32(b[0]) << 8
+	}
+	for (sum >> 16) > 0 {
+		sum = (sum >> 16) + (sum & 0xffff)
+	}
+	return ^uint16(sum)
+}
+
+// Marshal 编码 ICMP 消息并计算校验和
 func (m *Message) Marshal(_ []byte) ([]byte, error) {
 	if m.Body == nil {
 		return nil, errors.New("nil body")
@@ -56,7 +79,9 @@ func (m *Message) Marshal(_ []byte) ([]byte, error) {
 	b[0] = byte(m.Type)
 	b[1] = byte(m.Code)
 	copy(b[4:], body)
-	// 校验和置零
+	binary.BigEndian.PutUint16(b[2:4], 0)
+	csum := checksum(b)
+	binary.BigEndian.PutUint16(b[2:4], csum)
 	return b, nil
 }
 
