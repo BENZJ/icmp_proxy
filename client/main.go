@@ -18,6 +18,13 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
+// packetConn 抽象了我们需要的最小连接接口，便于在测试中替换实现。
+type packetConn interface {
+	ReadFrom([]byte) (int, net.Addr, error)
+	WriteTo([]byte, net.Addr) (int, error)
+	Close() error
+}
+
 // responseMap safely stores and retrieves response channels for concurrent requests.
 type responseMap struct {
 	sync.RWMutex
@@ -45,8 +52,9 @@ func (r *responseMap) Delete(id int) {
 
 var (
 	respChannels = &responseMap{m: make(map[int]chan *icmp.Echo)}
-	// Global shared ICMP connection
-	icmpConn *icmp.PacketConn
+	// Global shared ICMP connection. Using a minimal interface
+	// so tests can provide a mock implementation.
+	icmpConn packetConn
 )
 
 func main() {
@@ -80,13 +88,15 @@ func handleHTTPProxyRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestID := int(time.Now().UnixNano())
+	// ICMP ID 字段只有 16 位，因此我们只取时间戳的低 16 位作为请求 ID
+	requestID := int(time.Now().UnixNano() & 0xffff)
 	respBytes, err := sendICMPRequest(requestID, reqBytes)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 
+	log.Printf("收到 %d 字节的代理响应", len(respBytes))
 	resp, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(respBytes)), r)
 	if err != nil {
 		http.Error(w, "解析服务器响应失败", http.StatusInternalServerError)
@@ -160,7 +170,7 @@ func sendICMPRequest(requestID int, data []byte) ([]byte, error) {
 func listenForICMPResponses() {
 	for {
 		buf := make([]byte, 1500)
-		n, _, err := icmpConn.ReadFrom(buf)
+		n, addr, err := icmpConn.ReadFrom(buf)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && !netErr.Temporary() {
 				log.Printf("ICMP 监听器关闭: %v", err)
@@ -176,7 +186,7 @@ func listenForICMPResponses() {
 		}
 
 		if reply, ok := msg.Body.(*icmp.Echo); ok && msg.Type == ipv4.ICMPTypeEchoReply {
-			// The server's reply ID will match our original request ID.
+			log.Printf("收到来自 %s 的响应包 ID=%d Seq=%d 长度=%d", addr, reply.ID, reply.Seq, len(reply.Data))
 			if ch, found := respChannels.Get(reply.ID); found {
 				ch <- reply
 			}
