@@ -3,6 +3,7 @@ package icmp
 import (
 	"encoding/binary"
 	"errors"
+	"log"
 	"net"
 )
 
@@ -40,7 +41,12 @@ func (e *Echo) Marshal(proto int) ([]byte, error) {
 
 // ListenPacket 封装 net.ListenPacket
 func ListenPacket(network, address string) (net.PacketConn, error) {
-	return net.ListenPacket(network, address)
+	conn, err := net.ListenPacket(network, address)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("icmp.ListenPacket: network=%s address=%s", network, address)
+	return conn, nil
 }
 
 // checksum calculates the ICMP checksum for the given data using the standard

@@ -1,7 +1,10 @@
 package icmp
 
 import (
+	"bytes"
 	"encoding/binary"
+	"log"
+	"strings"
 	"testing"
 
 	"golang.org/x/net/ipv4"
@@ -39,5 +42,23 @@ func TestMessageMarshalChecksum(t *testing.T) {
 	got := binary.BigEndian.Uint16(b[2:4])
 	if got != want {
 		t.Errorf("checksum mismatch: got 0x%x, want 0x%x", got, want)
+	}
+}
+
+func TestListenPacketLogging(t *testing.T) {
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(old)
+
+	conn, err := ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("ListenPacket failed: %v", err)
+	}
+	conn.Close()
+
+	got := buf.String()
+	if !strings.Contains(got, "network=udp4") || !strings.Contains(got, "127.0.0.1:0") {
+		t.Errorf("log output missing expected text: %q", got)
 	}
 }
