@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"icmptun/pkg/protocol"
 	"io"
 	"net"
 	"net/http"
@@ -17,18 +18,18 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-// mockIcmpConn 用于在测试中捕获写入的 ICMP 数据包
+// mockIcmpConn captures all packets written to it, allowing for inspection.
 type mockIcmpConn struct {
 	mu      sync.Mutex
 	packets [][]byte
 	addr    net.Addr
 }
 
-// WriteTo 实现 icmpConn 接口，保存写入的数据包
+// WriteTo satisfies the icmpConn interface and stores the written packet.
 func (m *mockIcmpConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	// 保存数据包的副本
+	// Store a copy of the packet
 	packetCopy := make([]byte, len(p))
 	copy(packetCopy, p)
 	m.packets = append(m.packets, packetCopy)
@@ -36,17 +37,17 @@ func (m *mockIcmpConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	return len(p), nil
 }
 
-// GetPackets 返回捕获的数据包副本，便于检查
+// GetPackets returns a copy of the captured packets for safe inspection.
 func (m *mockIcmpConn) GetPackets() [][]byte {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([][]byte(nil), m.packets...)
 }
 
-// TestHandleHttpRequest_Chunking 测试完整的代理逻辑以及分片发送
+// TestHandleHttpRequest_Chunking tests the full proxy logic including response chunking.
 func TestHandleHttpRequest_Chunking(t *testing.T) {
-	// 1. 构建返回大量数据的模拟 HTTP 服务
-	responseBody := bytes.Repeat([]byte("0123456789"), 300) // 总计 3000 字节
+	// 1. Set up a mock HTTP server that returns a large response.
+	responseBody := bytes.Repeat([]byte("0123456789"), 300) // 3000 bytes response
 	mockHTTPServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
@@ -54,7 +55,7 @@ func TestHandleHttpRequest_Chunking(t *testing.T) {
 	}))
 	defer mockHTTPServer.Close()
 
-	// 2. 构造合法的 HTTP GET 请求并转为字节
+	// 2. Create a valid HTTP GET request and dump it to bytes.
 	req, err := http.NewRequest("GET", mockHTTPServer.URL, nil)
 	if err != nil {
 		t.Fatalf("Failed to create HTTP request: %v", err)
@@ -64,29 +65,28 @@ func TestHandleHttpRequest_Chunking(t *testing.T) {
 		t.Fatalf("Failed to dump HTTP request: %v", err)
 	}
 
-	// 3. 构造进入服务端的 ICMP 包
+	// 3. Prepare the incoming ICMP packet.
 	clientAddr := &net.IPAddr{IP: net.ParseIP("127.0.0.1")}
-	requestID := 1234
 	requestPacket := &icmp.Echo{
-		ID:   requestID,
-		Seq:  1, // 请求包本身的序号无关紧要
+		ID:   protocol.MagicID,
+		Seq:  1, // The sequence of the request itself doesn't matter for the response
 		Data: reqBytes,
 	}
 
-	// 4. 创建模拟的 ICMP 连接并调用处理函数
+	// 4. Create the mock ICMP connection and call the handler.
 	mockConn := &mockIcmpConn{}
 	handleHttpRequest(mockConn, clientAddr, requestPacket)
 
-	// 5. 等待处理函数完成所有分片发送
+	// 5. Give the handler time to process and send all chunks.
 	time.Sleep(200 * time.Millisecond)
 
-	// 6. 验证结果
+	// 6. Verify the results.
 	packets := mockConn.GetPackets()
 	if len(packets) < 3 { // Should be at least 2 data chunks + 1 final chunk
 		t.Fatalf("Expected at least 3 packets for a chunked response, but got %d", len(packets))
 	}
 
-	// 将所有分片重新组装为完整响应
+	// Reassemble the response from the chunks
 	var reassembledBody []byte
 	var receivedChunks []*icmp.Echo
 
@@ -99,8 +99,8 @@ func TestHandleHttpRequest_Chunking(t *testing.T) {
 		if !ok {
 			t.Fatalf("Packet #%d: Message body is not *icmp.Echo", i)
 		}
-		if echo.ID != requestID {
-			t.Errorf("Packet #%d: expected ID %d, got %d", i, requestID, echo.ID)
+		if echo.ID != protocol.MagicID {
+			t.Errorf("Packet #%d: Expected ID %d, got %d", i, protocol.MagicID, echo.ID)
 		}
 		receivedChunks = append(receivedChunks, echo)
 	}
@@ -116,12 +116,12 @@ func TestHandleHttpRequest_Chunking(t *testing.T) {
 		t.Errorf("Expected the last packet to be zero-length, but it had length %d", len(lastChunk.Data))
 	}
 
-	// 去掉最后一个空包后重新拼接数据
+	// Reassemble the data from all but the last packet
 	for _, chunk := range receivedChunks[:len(receivedChunks)-1] {
 		reassembledBody = append(reassembledBody, chunk.Data...)
 	}
 
-	// 7. 将重组后的数据解析为 HTTP 响应并校验内容
+	// 7. Parse the reassembled data as an HTTP response and verify its content.
 	reassembledResp, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(reassembledBody)), req)
 	if err != nil {
 		t.Fatalf("Failed to read reassembled HTTP response: %v", err)
@@ -143,3 +143,4 @@ func TestHandleHttpRequest_Chunking(t *testing.T) {
 
 	t.Logf("Successfully reassembled %d chunks into a valid HTTP response.", len(packets))
 }
+
