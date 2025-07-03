@@ -150,9 +150,9 @@ func simulateRequestAndResponse(t *testing.T, conn *mockPacketConn) {
 	chunk2 := respBytes[len(respBytes)/2:]
 
 	// 响应包需要与请求 ID 匹配，每个分片使用递增的 Seq 编号。
-	sendChunk(t, conn, addr, responseID, 0, chunk1)
-	sendChunk(t, conn, addr, responseID, 1, chunk2)
-	sendChunk(t, conn, addr, responseID, 2, []byte{}) // Final packet
+	sendChunk(t, conn, addr, responseID, 1, chunk1)
+	sendChunk(t, conn, addr, responseID, 2, chunk2)
+	sendChunk(t, conn, addr, responseID, 3, []byte{}) // Final packet
 	t.Log("服务器已发送所有分片")
 }
 

@@ -146,6 +146,11 @@ func sendICMPRequest(requestID int, data []byte) ([]byte, error) {
 	for {
 		select {
 		case packet := <-ch:
+			// 系统自动对 ping 请求的回应通常使用与请求相同的序号 0，
+			// 为避免误将其当作服务器响应，这里直接忽略 Seq 为 0 的分片。
+			if packet.Seq == 0 {
+				continue
+			}
 			if len(packet.Data) == 0 {
 				log.Printf("请求 %d 的响应接收完毕", requestID)
 				// Sort packets by sequence number before joining
