@@ -16,6 +16,9 @@ import (
 const (
 	// MaxChunkSize 定义一个 ICMP 包内的最大数据尺寸，保留给 IP 和 ICMP 头的空间
 	MaxChunkSize = 1400
+	// ResponseSeqStart 指定服务器发送响应分片时使用的起始序号。
+	// 保留 0 用于区分系统自动产生的 ping 响应。
+	ResponseSeqStart = 1
 )
 
 // icmpConn 定义一个可以写入 ICMP 包的接口，主要使用于单元测试时的模拟
@@ -105,7 +108,7 @@ func sendResponseInChunks(conn icmpConn, addr net.Addr, requestID int, data []by
 	totalLen := len(data)
 	log.Printf("以分块形式向 %s 发送 %d 字节响应", addr, totalLen)
 
-	for seq, i := 0, 0; i < totalLen; i, seq = i+MaxChunkSize, seq+1 {
+	for seq, i := ResponseSeqStart, 0; i < totalLen; i, seq = i+MaxChunkSize, seq+1 {
 		end := i + MaxChunkSize
 		if end > totalLen {
 			end = totalLen
@@ -140,7 +143,7 @@ func sendResponseInChunks(conn icmpConn, addr net.Addr, requestID int, data []by
 		Code: 0,
 		Body: &icmp.Echo{
 			ID:   requestID,
-			Seq:  (len(data) + MaxChunkSize - 1) / MaxChunkSize, // 最后一个序号
+			Seq:  ResponseSeqStart + (len(data)+MaxChunkSize-1)/MaxChunkSize,
 			Data: []byte{},
 		},
 	}
